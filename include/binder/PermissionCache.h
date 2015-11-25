@@ -22,7 +22,6 @@
 
 #include <utils/String16.h>
 #include <utils/Singleton.h>
-#include <utils/SortedVector.h>
 
 namespace android {
 // ---------------------------------------------------------------------------

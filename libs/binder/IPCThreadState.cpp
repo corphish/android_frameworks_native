@@ -20,11 +20,19 @@
 
 #include <binder/Binder.h>
 #include <binder/BpBinder.h>
+#include <binder/IServiceManager.h>
+#include <media/IMediaPlayerService.h>
 #include <cutils/sched_policy.h>
 #include <utils/Debug.h>
 #include <utils/Log.h>
 #include <utils/TextOutput.h>
 #include <utils/threads.h>
+#ifdef USE_PROJECT_SEC
+#include <binder/IServiceManager.h>
+#include <media/IMediaPlayerService.h>
+#include <utils/List.h>
+#include <cutils/properties.h>
+#endif
 
 #include <private/binder/binder_module.h>
 #include <private/binder/Static.h>
@@ -64,7 +72,7 @@
 #define LOG_ONEWAY(...) ALOG(LOG_DEBUG, "ipc", __VA_ARGS__)
 
 #endif
-
+#define MYLOG_ONEWAY(...) ALOG(LOG_DEBUG, "ipc", __VA_ARGS__)
 // ---------------------------------------------------------------------------
 
 namespace android {
@@ -73,6 +81,11 @@ static const char* getReturnString(size_t idx);
 static const char* getCommandString(size_t idx);
 static const void* printReturnCommand(TextOutput& out, const void* _cmd);
 static const void* printCommand(TextOutput& out, const void* _cmd);
+#ifdef USE_PROJECT_SEC
+void initKeyService(const String16& name, const sp<IBinder>& svc);
+bool doJudge(int uid, const sp<IBinder>& svc, unsigned int oprID, Parcel& data,  Parcel &reply);
+#endif
+
 
 // This will result in a missing symbol failure if the IF_LOG_COMMANDS()
 // conditionals don't get stripped...  but that is probably what we want.
@@ -371,6 +384,11 @@ int IPCThreadState::getCallingUid()
     return mCallingUid;
 }
 
+int IPCThreadState::getOrigCallingUid()
+{
+    return mOrigCallingUid;
+}
+
 int64_t IPCThreadState::clearCallingIdentity()
 {
     int64_t token = ((int64_t)mCallingUid<<32) | mCallingPid;
@@ -515,7 +533,24 @@ status_t IPCThreadState::transact(int32_t handle,
             << handle << " / code " << TypeCode(code) << ": "
             << indent << data << dedent << endl;
     }
-    
+#ifdef USE_PROJECT_SEC
+ 
+    if (handle == 0) {
+        if (code == IServiceManager::ADD_SERVICE_TRANSACTION) {
+		data.setDataPosition(0);
+            int32_t policy = data.readInt32();
+            String16 service = data.readString16();
+            //MYLOG_ONEWAY("fhy interface: %s", String8(service).string());
+            String16 name = data.readString16();
+            //MYLOG_ONEWAY("fhy name: %s", String8(name).string());
+            sp<IBinder> b = data.readStrongBinder();
+            //MYLOG_ONEWAY("fhy b: 0x%x", b.get());
+            data.setDataPosition(0);
+            initKeyService(name , b);
+        }
+    }
+#endif
+
     if (err == NO_ERROR) {
         LOG_ONEWAY(">>>> SEND from pid %d uid %d %s", getpid(), getuid(),
             (flags & TF_ONE_WAY) == 0 ? "READ REPLY" : "ONE WAY");
@@ -641,6 +676,7 @@ IPCThreadState::IPCThreadState()
 {
     pthread_setspecific(gTLS, this);
     clearCaller();
+    mOrigCallingUid = mCallingUid;
     mIn.setDataCapacity(256);
     mOut.setDataCapacity(256);
 }
@@ -752,9 +788,7 @@ finish:
 
 status_t IPCThreadState::talkWithDriver(bool doReceive)
 {
-    if (mProcess->mDriverFD <= 0) {
-        return -EBADF;
-    }
+    ALOG_ASSERT(mProcess->mDriverFD >= 0, "Binder driver is not opened");
     
     binder_write_read bwr;
     
@@ -810,9 +844,6 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
 #else
         err = INVALID_OPERATION;
 #endif
-        if (mProcess->mDriverFD <= 0) {
-            err = -EBADF;
-        }
         IF_LOG_COMMANDS() {
             alog << "Finished read/write, write size = " << mOut.dataSize() << endl;
         }
@@ -992,6 +1023,7 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
             
             mCallingPid = tr.sender_pid;
             mCallingUid = tr.sender_euid;
+            mOrigCallingUid = tr.sender_euid;
             
             int curPrio = getpriority(PRIO_PROCESS, mMyThreadId);
             if (gDisableBackgroundScheduling) {
@@ -1029,8 +1061,19 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
             }
             if (tr.target.ptr) {
                 sp<BBinder> b((BBinder*)tr.cookie);
-                const status_t error = b->transact(tr.code, buffer, &reply, tr.flags);
-                if (error < NO_ERROR) reply.setError(error);
+#ifdef USE_PROJECT_SEC
+                bool bFind = doJudge(mCallingUid, b, tr.code, buffer,reply);
+                if(!bFind)
+                {
+                  ;//  ALOGI("Add after doJudge PERMISSION_DENIED");
+                }
+                else
+#endif
+               
+		 {
+                    const status_t error = b->transact(tr.code, buffer, &reply, tr.flags);
+                    if (error < NO_ERROR) reply.setError(error);
+                }
 
             } else {
                 const status_t error = the_context_object->transact(tr.code, buffer, &reply, tr.flags);
@@ -1049,6 +1092,7 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
             
             mCallingPid = origPid;
             mCallingUid = origUid;
+            mOrigCallingUid = origUid;
 
             IF_LOG_TRANSACTIONS() {
                 TextOutput::Bundle _b(alog);
@@ -1103,9 +1147,7 @@ void IPCThreadState::threadDestructor(void *st)
 	if (self) {
 		self->flushCommands();
 #if defined(HAVE_ANDROID_OS)
-        if (self->mProcess->mDriverFD > 0) {
-            ioctl(self->mProcess->mDriverFD, BINDER_THREAD_EXIT, 0);
-        }
+        ioctl(self->mProcess->mDriverFD, BINDER_THREAD_EXIT, 0);
 #endif
 		delete self;
 	}

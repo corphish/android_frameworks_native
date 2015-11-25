@@ -504,8 +504,10 @@ bool Parcel::enforceInterface(const String16& interface,
     if (str == interface) {
         return true;
     } else {
-        ALOGW("**** enforceInterface() expected '%s' but read '%s'\n",
-                String8(interface).string(), String8(str).string());
+           //String8(interface).string() may causes some problem when something with interface is wrong;
+           ALOGW("**** enforceInterface() string read is not expected.");
+           // ALOGW("**** enforceInterface() expected '%s' but read '%s'\n",
+           //      String8(interface).string(), String8(str).string());
         return false;
     }
 }
@@ -1055,11 +1057,10 @@ int32_t Parcel::readExceptionCode() const
 {
   int32_t exception_code = readAligned<int32_t>();
   if (exception_code == EX_HAS_REPLY_HEADER) {
-    int32_t header_start = dataPosition();
     int32_t header_size = readAligned<int32_t>();
     // Skip over fat responses headers.  Not used (or propagated) in
     // native code
-    setDataPosition(header_start + header_size);
+    setDataPosition(dataPosition() + header_size);
     // And fat response headers are currently only used when there are no
     // exceptions, so return no error:
     return 0;
@@ -1429,8 +1430,6 @@ status_t Parcel::continueWrite(size_t desired)
         if (objectsSize) {
             objects = (size_t*)malloc(objectsSize*sizeof(size_t));
             if (!objects) {
-                free(data);
-
                 mError = NO_MEMORY;
                 return NO_MEMORY;
             }
@@ -1511,7 +1510,7 @@ status_t Parcel::continueWrite(size_t desired)
             mError = NO_MEMORY;
             return NO_MEMORY;
         }
-
+        
         if(!(mDataCapacity == 0 && mObjects == NULL
              && mObjectsCapacity == 0)) {
             ALOGE("continueWrite: %d/%p/%d/%d", mDataCapacity, mObjects, mObjectsCapacity, desired);
