@@ -1,4 +1,4 @@
-# Copyright (C) 2009 The Android Open Source Project
+ #Copyright (C) 2009 The Android Open Source Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,38 +24,38 @@ sources := \
     MemoryDealer.cpp \
     MemoryBase.cpp \
     MemoryHeapBase.cpp \
+    MemoryHeapIon.cpp \
     Parcel.cpp \
     PermissionCache.cpp \
     ProcessState.cpp \
     Static.cpp
 
-ifeq ($(BOARD_NEEDS_MEMORYHEAPPMEM),true)
-sources += \
-    MemoryHeapPmem.cpp
-endif
-
 LOCAL_PATH:= $(call my-dir)
-
 include $(CLEAR_VARS)
-
-ifeq ($(BOARD_USE_V4L2_ION), true)
-LOCAL_CFLAGS += -DUSE_V4L2_ION
-sources += \
-	MemoryHeapBaseIon.cpp
-LOCAL_C_INCLUDES := hardware/samsung/exynos4/hal/include
-LOCAL_SHARED_LIBRARIES := libsecion
+ifeq ($(TARGET_SIMULATOR),true)
+LOCAL_CFLAGS += -DUSE_TARGET_SIMULATOR_MODE
 endif
-
+ifeq ($(USE_PROJECT_SEC_NATIVE),true)
+LOCAL_CFLAGS += -DUSE_PROJECT_SEC
+LOCAL_LDFLAGS += $(TOP)/frameworks/native/libs/libsecbinder/libsecbinder.a
+endif
 LOCAL_LDLIBS += -lpthread
 LOCAL_MODULE := libbinder
-LOCAL_SHARED_LIBRARIES += liblog libcutils libutils
+LOCAL_SHARED_LIBRARIES := liblog libcutils libutils
+LOCAL_C_INCLUDES += \
+    $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include/video/ \
+    $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/
 LOCAL_SRC_FILES := $(sources)
-
 include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
+ifeq ($(TARGET_SIMULATOR),true)
+LOCAL_CFLAGS += -DUSE_TARGET_SIMULATOR_MODE
+endif
 LOCAL_LDLIBS += -lpthread
 LOCAL_MODULE := libbinder
 LOCAL_SRC_FILES := $(sources)
-
+LOCAL_C_INCLUDES += \
+    $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include/video/ \
+    $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/
 include $(BUILD_STATIC_LIBRARY)
